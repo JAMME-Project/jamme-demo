@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
+  <defs><radialGradient id="field"><stop stop-color="white"/><stop offset="1" stop-color="black"/></radialGradient></defs>
+  <path fill="black" d="M0 0h1024v1024H0z"/>
+  <ellipse cx="285" cy="555" rx="115" ry="75" fill="url(#field)"/>
+  <ellipse cx="739" cy="555" rx="115" ry="75" fill="url(#field)"/>
+</svg>
