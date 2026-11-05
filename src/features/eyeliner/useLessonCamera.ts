@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import type { FaceLandmarker, NormalizedLandmark } from '@mediapipe/tasks-vision';
+import type { FaceLandmarker } from '@mediapipe/tasks-vision';
 import { ArError, toUserMessage } from '../ar/runtime/ArRuntime';
-import { drawGuides, loadGuideArtwork } from './drawGuides';
+import { createGuideRenderer, loadGuideArtwork } from './drawGuides';
 import type { LensKey } from './lesson';
 
 type Settings = { key: string; guides: readonly LensKey[] };
@@ -15,6 +15,7 @@ export function useLessonCamera(settings: Settings) {
   const session = useRef<Session | null>(null);
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
+  const sourceRef = useRef<HTMLCanvasElement | null>(null);
   const current = useRef(settings);
 
   useEffect(() => {
@@ -54,13 +55,16 @@ export function useLessonCamera(settings: Settings) {
     let stream: MediaStream | undefined;
     let tracker: FaceLandmarker | undefined;
     let frame = 0;
+    let videoFrame: number | undefined;
     let cancelled = false;
     const end = () => {
       if (cancelled) return;
       cancelled = true;
       cancelAnimationFrame(frame);
+      if (videoFrame !== undefined) video.cancelVideoFrameCallback(videoFrame);
       stream?.getTracks().forEach((track) => track.stop());
       video.srcObject = null;
+      sourceRef.current = null;
       tracker?.close();
       ctx.clearRect(0, 0, canvas.width, canvas.height);
       session.current = null;
@@ -113,30 +117,47 @@ export function useLessonCamera(settings: Settings) {
       const images = await loadGuideArtwork();
       if (cancelled) return;
       const detector = tracker;
+      const renderGuides = createGuideRenderer(images);
+      const input = document.createElement('canvas');
+      const inputContext = input.getContext('2d');
+      if (!inputContext) throw new Error('카메라 영상을 준비할 수 없어요.');
       const reducedMotion = matchMedia('(prefers-reduced-motion: reduce)').matches;
-      let landmarks: NormalizedLandmark[] | undefined;
       let lastVideoTime = -1;
-      let lastDetection = -Infinity;
       let lastStep = '';
       let guideStart = 0;
+      let found = false;
+      let ready = false;
+
+      const scheduleFrame = () => {
+        if (typeof video.requestVideoFrameCallback === 'function') {
+          videoFrame = video.requestVideoFrameCallback(render);
+        } else {
+          frame = requestAnimationFrame(render);
+        }
+      };
       const render = (time: number) => {
         if (cancelled) return;
         try {
-          if (video.readyState >= HTMLMediaElement.HAVE_CURRENT_DATA && video.videoWidth) {
+          if (
+            video.readyState >= HTMLMediaElement.HAVE_CURRENT_DATA &&
+            video.videoWidth &&
+            video.currentTime !== lastVideoTime
+          ) {
             const { videoWidth: width, videoHeight: height } = video;
-            if (canvas.width !== width || canvas.height !== height) {
-              canvas.width = width;
-              canvas.height = height;
+            if (input.width !== width || input.height !== height) {
+              canvas.width = input.width = width;
+              canvas.height = input.height = height;
             }
-            if (time - lastDetection >= 66 && video.currentTime !== lastVideoTime) {
-              lastDetection = time;
-              lastVideoTime = video.currentTime;
-              const next = detector.detectForVideo(video, time).faceLandmarks[0];
-              if (Boolean(next) !== Boolean(landmarks)) setFaceFound(Boolean(next));
-              landmarks = next;
+            lastVideoTime = video.currentTime;
+            // Detect and paint the same snapshot so a moving face cannot outrun its guide.
+            inputContext.drawImage(video, 0, 0, width, height);
+            const landmarks = detector.detectForVideo(input, time).faceLandmarks[0];
+            if (Boolean(landmarks) !== found) {
+              found = Boolean(landmarks);
+              setFaceFound(found);
             }
             ctx.setTransform(-1, 0, 0, 1, width, 0);
-            ctx.drawImage(video, 0, 0, width, height);
+            ctx.drawImage(input, 0, 0, width, height);
             ctx.resetTransform();
             const { key, guides } = current.current;
             if (key !== lastStep) {
@@ -144,33 +165,36 @@ export function useLessonCamera(settings: Settings) {
               guideStart = time;
             }
             if (landmarks) {
-              drawGuides(
+              renderGuides(
                 ctx,
                 landmarks,
-                images,
                 guides,
                 key.startsWith('setup:'),
                 reducedMotion ? 1000 : time - guideStart,
               );
             }
+            sourceRef.current = input;
+            if (!ready) {
+              ready = true;
+              setStatus('running');
+            }
           }
-          frame = requestAnimationFrame(render);
+          scheduleFrame();
         } catch (cause) {
           fail(cause);
         }
       };
-      setStatus('running');
-      frame = requestAnimationFrame(render);
+      scheduleFrame();
     } catch (cause) {
       fail(cause);
     }
   }
 
   function capture(frame: HTMLElement) {
-    const video = videoRef.current;
+    const source = sourceRef.current;
     const preview = canvasRef.current;
-    if (!video?.videoWidth || !preview) return null;
-    const { videoWidth, videoHeight } = video;
+    if (!source?.width || !preview) return null;
+    const { width: videoWidth, height: videoHeight } = source;
     const bounds = preview.getBoundingClientRect();
     const crop = frame.getBoundingClientRect();
     const scale = Math.max(bounds.width / videoWidth, bounds.height / videoHeight);
@@ -188,7 +212,17 @@ export function useLessonCamera(settings: Settings) {
     const height = crop.height / scale;
     ctx.translate(photo.width, 0);
     ctx.scale(-1, 1);
-    ctx.drawImage(video, videoWidth - x - width, y, width, height, 0, 0, photo.width, photo.height);
+    ctx.drawImage(
+      source,
+      videoWidth - x - width,
+      y,
+      width,
+      height,
+      0,
+      0,
+      photo.width,
+      photo.height,
+    );
     return photo.toDataURL('image/jpeg', 0.92);
   }
 
