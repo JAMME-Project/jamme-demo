@@ -59,7 +59,7 @@ export const steps: readonly LessonStep[] = [
     key: 'endpoint',
     number: 2,
     title: '꼬리 끝을 정해요',
-    body: '눈꼬리에서 수평으로 뻗어 가이드와 만나는 곳을 끝점으로 잡으세요.',
+    body: '시작점 높이에서 바깥쪽으로 뻗어 사선 가이드와 만나는 곳을 끝점으로 잡으세요.',
     action: '끝점을 잡았어요',
     guides: startAndEnd,
   },

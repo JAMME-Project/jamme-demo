@@ -1,11 +1,10 @@
 import type { NormalizedLandmark } from '@mediapipe/tasks-vision';
 import type { LensKey } from './lesson';
-import mesh from './guideMesh.data.json';
-import { eyeContours, projectGuideVertices, triangleTransform, type Point } from './guideMesh';
+import { eyeContours, getGuideEyes, triangleTransform, type Point } from './guideMesh';
+import { activeRibbonPatches, eyelidRibbons, projectEyelidRibbon } from './eyelidRibbon';
 
 const artwork = {
   eye1: 'eye-1.png',
-  eye2: 'eye-2.png',
   eye3: 'eye-3.png',
   eye4: 'eye-4.png',
   eye5: 'eye-5.png',
@@ -15,7 +14,7 @@ const artwork = {
   animation1: 'tail-animation.png',
   animation2: 'connect-animation.png',
   puff: 'puff.png',
-} satisfies Record<LensKey | 'puff', string>;
+} satisfies Record<Exclude<LensKey, 'eye2'> | 'puff', string>;
 
 type GuideImages = Record<keyof typeof artwork, HTMLImageElement>;
 const animationBounds = {
@@ -48,31 +47,13 @@ export function loadGuideArtwork() {
   return pendingArtwork;
 }
 
-function createPatches(vertices: readonly Point[]) {
-  return mesh.triangles.map((indices) => {
-    const points = indices.map((index) => vertices[index]);
-    const left = Math.max(0, Math.floor(Math.min(...points.map((p) => p.x))) - 1);
-    const top = Math.max(0, Math.floor(Math.min(...points.map((p) => p.y))) - 1);
-    const right = Math.min(390, Math.ceil(Math.max(...points.map((p) => p.x))) + 1);
-    const bottom = Math.min(844, Math.ceil(Math.max(...points.map((p) => p.y))) + 1);
-    return { indices, points, left, top, width: right - left, height: bottom - top };
-  });
-}
-
-const eyelidPatches = createPatches(mesh.vertices);
-const baselinePatches = createPatches(
-  mesh.vertices.map(({ baselineX, baselineY }) => ({ x: baselineX, y: baselineY })),
-);
-
 function drawPatches(
   ctx: CanvasRenderingContext2D,
   texture: HTMLCanvasElement,
-  patches: ReturnType<typeof createPatches>,
-  active: readonly number[],
+  patches: (typeof eyelidRibbons)[number]['patches'],
   vertices: readonly Point[],
 ) {
-  for (const index of active) {
-    const patch = patches[index];
+  for (const patch of patches) {
     const target = patch.indices.map((id) => vertices[id]);
     const transform = triangleTransform(patch.points, target);
     if (!transform || patch.width <= 0 || patch.height <= 0) continue;
@@ -113,15 +94,10 @@ export function createGuideRenderer(images: GuideImages) {
   texture.width = 390;
   texture.height = 844;
   const paint = texture.getContext('2d');
-  const baseline = document.createElement('canvas');
-  baseline.width = 390;
-  baseline.height = 844;
-  const baselinePaint = baseline.getContext('2d');
-  if (!paint || !baselinePaint) throw new Error('아이라인 가이드를 준비할 수 없어요.');
-  baselinePaint.drawImage(images.eye2, -29.016, 135.04, 452.205, 613.841);
+  if (!paint) throw new Error('아이라인 가이드를 준비할 수 없어요.');
   let lastGuides = '';
   let lastProgress = -1;
-  let activeTriangles: number[] = [];
+  let activePatches: ReturnType<typeof activeRibbonPatches>[] = [];
 
   return (
     ctx: CanvasRenderingContext2D,
@@ -155,11 +131,7 @@ export function createGuideRenderer(images: GuideImages) {
     const progress = animated ? Math.min(1, elapsed / 900) : 1;
     const changed = key !== lastGuides;
     if (changed) {
-      activeTriangles = [
-        ...new Set(
-          guides.filter((guide) => guide !== 'eye2').flatMap((guide) => mesh.guides[guide]),
-        ),
-      ];
+      activePatches = eyelidRibbons.map((_, side) => activeRibbonPatches(side, guides));
     }
     if (changed || progress !== lastProgress) {
       paint.clearRect(0, 0, 390, 844);
@@ -182,7 +154,7 @@ export function createGuideRenderer(images: GuideImages) {
       lastProgress = progress;
     }
 
-    const vertices = projectGuideVertices(landmarks, width, height);
+    const eyes = getGuideEyes(landmarks, width, height);
     ctx.save();
     ctx.beginPath();
     ctx.rect(0, 0, width, height);
@@ -197,10 +169,22 @@ export function createGuideRenderer(images: GuideImages) {
       ctx.closePath();
     }
     ctx.clip('evenodd');
-    if (guides.includes('eye2')) {
-      drawPatches(ctx, baseline, baselinePatches, mesh.guides.eye2, vertices);
+    for (const [side, eye] of eyes.entries()) {
+      if (eye.width < 5) continue;
+      if (guides.includes('eye2')) {
+        ctx.save();
+        ctx.strokeStyle = '#5ab8f6';
+        ctx.lineWidth = Math.max(1.2, eye.width * 0.02);
+        ctx.lineCap = 'round';
+        ctx.setLineDash([Math.max(1, eye.width * 0.015), Math.max(2, eye.width * 0.045)]);
+        ctx.beginPath();
+        ctx.moveTo(eye.nose.x, eye.nose.y);
+        ctx.lineTo(eye.brow.x, eye.brow.y);
+        ctx.stroke();
+        ctx.restore();
+      }
+      drawPatches(ctx, texture, activePatches[side], projectEyelidRibbon(eye, side));
     }
-    drawPatches(ctx, texture, eyelidPatches, activeTriangles, vertices);
     ctx.restore();
   };
 }

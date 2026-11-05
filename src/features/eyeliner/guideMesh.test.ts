@@ -1,43 +1,128 @@
 import { describe, expect, it } from 'vitest';
 import type { NormalizedLandmark } from '@mediapipe/tasks-vision';
-import mesh from './guideMesh.data.json';
-import { projectGuideVertices, triangleTransform } from './guideMesh';
+import {
+  firstDotFraction,
+  getGuideEyes,
+  sampleUpperLid,
+  secondDotFraction,
+  triangleTransform,
+  type Point,
+} from './guideMesh';
+import { eyelidRibbons, projectEyelidRibbon } from './eyelidRibbon';
 
-describe('face guide mesh', () => {
-  it('anchors the eyelid, brow, and nose independently in the mirrored preview', () => {
-    const face: NormalizedLandmark[] = Array.from({ length: 468 }, () => ({
-      x: 0.5,
-      y: 0.5,
-      z: 0,
-      visibility: 1,
-    }));
-    face[386] = { x: 0.72, y: 0.31, z: 0, visibility: 1 };
-    face[300] = { x: 0.8, y: 0.21, z: 0, visibility: 1 };
-    face[327] = { x: 0.6, y: 0.59, z: 0, visibility: 1 };
-    const points = projectGuideVertices(face, 640, 480);
+const width = 400;
+const height = 600;
 
-    for (const index of [386, 300, 327]) {
-      const vertex = mesh.vertices.findIndex(
-        ({ anchors }) => anchors.length === 1 && anchors[0].index === index,
-      );
-      expect(vertex).toBeGreaterThanOrEqual(0);
-      expect(points[vertex].x).toBeCloseTo((1 - face[index].x) * 640);
-      expect(points[vertex].y).toBeCloseTo(face[index].y * 480);
+function makeFace() {
+  const face: NormalizedLandmark[] = Array.from({ length: 468 }, () => ({
+    x: 0.5,
+    y: 0.5,
+    z: 0,
+    visibility: 1,
+  }));
+  const upper = [
+    [70, 240],
+    [73, 237],
+    [79, 232],
+    [90, 227],
+    [110, 225],
+    [129, 229],
+    [140, 235],
+    [147, 241],
+    [150, 246],
+  ];
+  for (const [side, indices] of [
+    [263, 466, 388, 387, 386, 385, 384, 398, 362],
+    [33, 246, 161, 160, 159, 158, 157, 173, 133],
+  ].entries()) {
+    indices.forEach((index, i) => {
+      const [x, y] = upper[i];
+      face[index] = { x: 1 - (side ? width - x : x) / width, y: y / height, z: 0, visibility: 1 };
+    });
+  }
+  for (const [index, x, y] of [
+    [327, 150, 360],
+    [300, 40, 180],
+    [98, 250, 360],
+    [70, 360, 180],
+  ]) {
+    face[index] = { x: 1 - x / width, y: y / height, z: 0, visibility: 1 };
+  }
+  return face;
+}
+
+describe('eyeliner placement', () => {
+  it('places the two marks by upper-lid arc length, closer to the outer corner', () => {
+    for (const eye of getGuideEyes(makeFace(), width, height)) {
+      expect(eye.first).toEqual(sampleUpperLid(eye.upper, firstDotFraction));
+      expect(eye.second).toEqual(sampleUpperLid(eye.upper, secondDotFraction));
+      expect(firstDotFraction).toBeLessThan(0.25);
+      expect(secondDotFraction).toBeLessThan(0.5);
     }
-
-    face[386].y += 0.06;
-    const next = projectGuideVertices(face, 640, 480);
-    const eyelid = mesh.vertices.findIndex(
-      ({ anchors }) => anchors.length === 1 && anchors[0].index === 386,
-    );
-    expect(next[eyelid].y - points[eyelid].y).toBeCloseTo(28.8);
-    const brow = mesh.vertices.findIndex(
-      ({ anchors }) => anchors.length === 1 && anchors[0].index === 300,
-    );
-    expect(next[brow]).toEqual(points[brow]);
   });
 
-  it('maps all three triangle corners under rotation and unequal horizontal and vertical scaling', () => {
+  it('places both wing endpoints outside the eye and on the nose-to-brow guide', () => {
+    for (const eye of getGuideEyes(makeFace(), width, height)) {
+      const dx = eye.brow.x - eye.nose.x,
+        dy = eye.brow.y - eye.nose.y;
+      const cross = (eye.tail.x - eye.nose.x) * dy - (eye.tail.y - eye.nose.y) * dx;
+      expect(cross).toBeCloseTo(0);
+      const outward = {
+        x: (eye.outer.x - eye.inner.x) / eye.width,
+        y: (eye.outer.y - eye.inner.y) / eye.width,
+      };
+      const extension =
+        ((eye.tail.x - eye.outer.x) * outward.x + (eye.tail.y - eye.outer.y) * outward.y) /
+        eye.width;
+      expect(extension).toBeGreaterThanOrEqual(0.079);
+      expect(extension).toBeLessThanOrEqual(0.281);
+    }
+  });
+
+  it('attaches the original endpoint artwork to that same intersection on both sides', () => {
+    const eyes = getGuideEyes(makeFace(), width, height);
+    for (const [side, eye] of eyes.entries()) {
+      const ribbon = eyelidRibbons[side];
+      const index = ribbon.samples.findIndex(
+        (sample) => Math.abs(sample.x - ribbon.tail.x) < 0.001,
+      );
+      expect(index).toBeGreaterThanOrEqual(0);
+      const vertices = projectEyelidRibbon(eye, side);
+      const top = vertices[index * 2],
+        bottom = vertices[index * 2 + 1];
+      const fraction = (ribbon.tail.y - ribbon.top) / (ribbon.bottom - ribbon.top);
+      expect(top.x + (bottom.x - top.x) * fraction).toBeCloseTo(eye.tail.x, 2);
+      expect(top.y + (bottom.y - top.y) * fraction).toBeCloseTo(eye.tail.y, 2);
+    }
+  });
+
+  it('preserves the attachment when the face rotates and changes scale', () => {
+    const face = makeFace();
+    const before = getGuideEyes(face, width, height);
+    const angle = Math.PI / 12;
+    const transform = (point: Point) => {
+      const x = point.x - 200,
+        y = point.y - 240;
+      return {
+        x: 200 + 1.1 * (x * Math.cos(angle) - y * Math.sin(angle)),
+        y: 240 + 1.1 * (x * Math.sin(angle) + y * Math.cos(angle)),
+      };
+    };
+    const rotated = face.map((point) => {
+      const next = transform({ x: (1 - point.x) * width, y: point.y * height });
+      return { ...point, x: 1 - next.x / width, y: next.y / height };
+    });
+    const after = getGuideEyes(rotated, width, height);
+    for (const [i, eye] of after.entries()) {
+      for (const key of ['first', 'second', 'tail'] as const) {
+        const expected = transform(before[i][key]);
+        expect(eye[key].x).toBeCloseTo(expected.x);
+        expect(eye[key].y).toBeCloseTo(expected.y);
+      }
+    }
+  });
+
+  it('maps triangle corners under unequal scaling and omits folded regions', () => {
     const source = [
       { x: 2, y: 3 },
       { x: 12, y: 3 },
@@ -55,32 +140,7 @@ describe('face guide mesh', () => {
       expect(a * point.x + c * point.y + e).toBeCloseTo(target[index].x);
       expect(b * point.x + d * point.y + f).toBeCloseTo(target[index].y);
     });
-  });
-
-  it('omits collapsed and folded regions instead of drawing a stretched patch', () => {
-    const source = [
-      { x: 0, y: 0 },
-      { x: 10, y: 0 },
-      { x: 0, y: 10 },
-    ];
     expect(triangleTransform(source, [source[0], source[1], source[1]])).toBeNull();
     expect(triangleTransform(source, [source[0], source[2], source[1]])).toBeNull();
-  });
-
-  it('keeps every artwork patch valid and every projected vertex tied to facial landmarks', () => {
-    for (const { anchors } of mesh.vertices) {
-      expect(anchors.reduce((sum, anchor) => sum + anchor.weight, 0)).toBeCloseTo(1);
-      expect(anchors.every(({ index }) => index >= 0 && index < 468)).toBe(true);
-    }
-    for (const [guide, patches] of Object.entries(mesh.guides)) {
-      expect(patches.length).toBeGreaterThan(0);
-      for (const patch of patches) {
-        const source = mesh.triangles[patch].map((index) => {
-          const vertex = mesh.vertices[index];
-          return guide === 'eye2' ? { x: vertex.baselineX, y: vertex.baselineY } : vertex;
-        });
-        expect(triangleTransform(source, source)).not.toBeNull();
-      }
-    }
   });
 });

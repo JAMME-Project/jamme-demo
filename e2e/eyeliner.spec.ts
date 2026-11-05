@@ -118,20 +118,41 @@ test('the camera stays on through practice and releases for review and retakes',
           if (distance > 2) inside++;
         }
       }
-      const outer = points[0];
-      const inner = points[8];
-      const dx = inner.x - outer.x;
-      const dy = inner.y - outer.y;
-      const fraction =
-        ((totalX / count - outer.x) * dx + (totalY / count - outer.y) * dy) / (dx * dx + dy * dy);
+      const upper = [points[0], ...points.slice(9).reverse(), points[8]];
+      let arcLength = 0;
+      let nearest = Infinity;
+      let position = 0;
+      upper.slice(1).forEach((b, i) => {
+        const a = upper[i],
+          dx = b.x - a.x,
+          dy = b.y - a.y;
+        const length = Math.hypot(dx, dy);
+        const along = Math.max(
+          0,
+          Math.min(
+            1,
+            ((totalX / count - a.x) * dx + (totalY / count - a.y) * dy) / (length * length),
+          ),
+        );
+        const distance = Math.hypot(
+          totalX / count - a.x - along * dx,
+          totalY / count - a.y - along * dy,
+        );
+        if (distance < nearest) {
+          nearest = distance;
+          position = arcLength + along * length;
+        }
+        arcLength += length;
+      });
+      const fraction = position / arcLength;
       return { count, inside, fraction };
     });
   });
   for (const eye of placement) {
     expect(eye.count).toBeGreaterThan(5);
     expect(eye.inside).toBe(0);
-    expect(eye.fraction).toBeGreaterThan(0.15);
-    expect(eye.fraction).toBeLessThan(0.35);
+    expect(eye.fraction).toBeGreaterThan(0.13);
+    expect(eye.fraction).toBeLessThan(0.23);
   }
 
   for (const label of [
