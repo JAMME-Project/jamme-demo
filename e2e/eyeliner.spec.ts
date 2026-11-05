@@ -87,6 +87,15 @@ test('the camera stays on through practice and releases for review and retakes',
     'src',
     /^data:image\/jpeg;base64,/,
   );
+  const photoAspect = await page
+    .getByRole('img', { name: '방금 찍은 아이라인 사진' })
+    .evaluate(async (element) => {
+      const image = element as HTMLImageElement;
+      await image.decode();
+      const bounds = image.getBoundingClientRect();
+      return Math.abs(bounds.width / bounds.height - image.naturalWidth / image.naturalHeight);
+    });
+  expect(photoAspect).toBeLessThan(0.01);
   await page.evaluate(() => document.dispatchEvent(new Event('lesson-test-state')));
   await expect(page.locator('html')).toHaveAttribute('data-camera-starts', '1');
   await expect(page.locator('html')).toHaveAttribute('data-camera-stops', '1');

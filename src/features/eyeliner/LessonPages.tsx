@@ -106,7 +106,7 @@ export function Preparation({ onBack, onStart }: { onBack: () => void; onStart: 
               {items.map(({ icon: Icon, title, body, tone, tag }) => (
                 <li key={title}>
                   <span className={`j-tile-icon j-tile-icon--${tone}`}>
-                    <Icon size={24} aria-hidden="true" />
+                    <Icon size={20} aria-hidden="true" />
                   </span>
                   <div>
                     <h3>
