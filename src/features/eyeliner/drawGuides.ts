@@ -1,7 +1,7 @@
 import type { NormalizedLandmark } from '@mediapipe/tasks-vision';
 import type { LensKey } from './lesson';
 import mesh from './guideMesh.data.json';
-import { projectGuideVertices, triangleTransform } from './guideMesh';
+import { eyeContours, projectGuideVertices, triangleTransform, type Point } from './guideMesh';
 
 const artwork = {
   eye1: 'eye-1.png',
@@ -48,21 +48,77 @@ export function loadGuideArtwork() {
   return pendingArtwork;
 }
 
-const sourceTriangles = mesh.triangles.map((indices) => {
-  const points = indices.map((index) => mesh.vertices[index]);
-  const left = Math.max(0, Math.floor(Math.min(...points.map((p) => p.x))) - 1);
-  const top = Math.max(0, Math.floor(Math.min(...points.map((p) => p.y))) - 1);
-  const right = Math.min(390, Math.ceil(Math.max(...points.map((p) => p.x))) + 1);
-  const bottom = Math.min(844, Math.ceil(Math.max(...points.map((p) => p.y))) + 1);
-  return { indices, points, left, top, width: right - left, height: bottom - top };
-});
+function createPatches(vertices: readonly Point[]) {
+  return mesh.triangles.map((indices) => {
+    const points = indices.map((index) => vertices[index]);
+    const left = Math.max(0, Math.floor(Math.min(...points.map((p) => p.x))) - 1);
+    const top = Math.max(0, Math.floor(Math.min(...points.map((p) => p.y))) - 1);
+    const right = Math.min(390, Math.ceil(Math.max(...points.map((p) => p.x))) + 1);
+    const bottom = Math.min(844, Math.ceil(Math.max(...points.map((p) => p.y))) + 1);
+    return { indices, points, left, top, width: right - left, height: bottom - top };
+  });
+}
+
+const eyelidPatches = createPatches(mesh.vertices);
+const baselinePatches = createPatches(
+  mesh.vertices.map(({ baselineX, baselineY }) => ({ x: baselineX, y: baselineY })),
+);
+
+function drawPatches(
+  ctx: CanvasRenderingContext2D,
+  texture: HTMLCanvasElement,
+  patches: ReturnType<typeof createPatches>,
+  active: readonly number[],
+  vertices: readonly Point[],
+) {
+  for (const index of active) {
+    const patch = patches[index];
+    const target = patch.indices.map((id) => vertices[id]);
+    const transform = triangleTransform(patch.points, target);
+    if (!transform || patch.width <= 0 || patch.height <= 0) continue;
+    const cx = (target[0].x + target[1].x + target[2].x) / 3;
+    const cy = (target[0].y + target[1].y + target[2].y) / 3;
+    ctx.save();
+    ctx.beginPath();
+    // Overlap the clips slightly to avoid antialiasing gaps between adjacent patches.
+    for (const [i, point] of target.entries()) {
+      const dx = point.x - cx;
+      const dy = point.y - cy;
+      const length = Math.max(1, Math.hypot(dx, dy));
+      const x = point.x + (dx * 0.35) / length;
+      const y = point.y + (dy * 0.35) / length;
+      if (i === 0) ctx.moveTo(x, y);
+      else ctx.lineTo(x, y);
+    }
+    ctx.closePath();
+    ctx.clip();
+    ctx.setTransform(...transform);
+    ctx.drawImage(
+      texture,
+      patch.left,
+      patch.top,
+      patch.width,
+      patch.height,
+      patch.left,
+      patch.top,
+      patch.width,
+      patch.height,
+    );
+    ctx.restore();
+  }
+}
 
 export function createGuideRenderer(images: GuideImages) {
   const texture = document.createElement('canvas');
   texture.width = 390;
   texture.height = 844;
   const paint = texture.getContext('2d');
-  if (!paint) throw new Error('아이라인 가이드를 준비할 수 없어요.');
+  const baseline = document.createElement('canvas');
+  baseline.width = 390;
+  baseline.height = 844;
+  const baselinePaint = baseline.getContext('2d');
+  if (!paint || !baselinePaint) throw new Error('아이라인 가이드를 준비할 수 없어요.');
+  baselinePaint.drawImage(images.eye2, -29.016, 135.04, 452.205, 613.841);
   let lastGuides = '';
   let lastProgress = -1;
   let activeTriangles: number[] = [];
@@ -99,11 +155,16 @@ export function createGuideRenderer(images: GuideImages) {
     const progress = animated ? Math.min(1, elapsed / 900) : 1;
     const changed = key !== lastGuides;
     if (changed) {
-      activeTriangles = [...new Set(guides.flatMap((guide) => mesh.guides[guide]))];
+      activeTriangles = [
+        ...new Set(
+          guides.filter((guide) => guide !== 'eye2').flatMap((guide) => mesh.guides[guide]),
+        ),
+      ];
     }
     if (changed || progress !== lastProgress) {
       paint.clearRect(0, 0, 390, 844);
       for (const guide of guides) {
+        if (guide === 'eye2') continue;
         if (guide === 'animation1' || guide === 'animation2') {
           for (const [start, end] of animationBounds[guide]) {
             paint.save();
@@ -122,40 +183,24 @@ export function createGuideRenderer(images: GuideImages) {
     }
 
     const vertices = projectGuideVertices(landmarks, width, height);
-    for (const index of activeTriangles) {
-      const patch = sourceTriangles[index];
-      const target = patch.indices.map((id) => vertices[id]);
-      const transform = triangleTransform(patch.points, target);
-      if (!transform || patch.width <= 0 || patch.height <= 0) continue;
-      const cx = (target[0].x + target[1].x + target[2].x) / 3;
-      const cy = (target[0].y + target[1].y + target[2].y) / 3;
-      ctx.save();
-      ctx.beginPath();
-      // Overlap the clips slightly to avoid antialiasing gaps between adjacent patches.
-      for (const [i, point] of target.entries()) {
-        const dx = point.x - cx;
-        const dy = point.y - cy;
-        const length = Math.max(1, Math.hypot(dx, dy));
-        const x = point.x + (dx * 0.35) / length;
-        const y = point.y + (dy * 0.35) / length;
+    ctx.save();
+    ctx.beginPath();
+    ctx.rect(0, 0, width, height);
+    // Guidance belongs on the skin. Exclude the eye openings, including the iris.
+    for (const contour of eyeContours) {
+      contour.forEach((index, i) => {
+        const x = (1 - landmarks[index].x) * width;
+        const y = landmarks[index].y * height;
         if (i === 0) ctx.moveTo(x, y);
         else ctx.lineTo(x, y);
-      }
+      });
       ctx.closePath();
-      ctx.clip();
-      ctx.setTransform(...transform);
-      ctx.drawImage(
-        texture,
-        patch.left,
-        patch.top,
-        patch.width,
-        patch.height,
-        patch.left,
-        patch.top,
-        patch.width,
-        patch.height,
-      );
-      ctx.restore();
     }
+    ctx.clip('evenodd');
+    if (guides.includes('eye2')) {
+      drawPatches(ctx, baseline, baselinePatches, mesh.guides.eye2, vertices);
+    }
+    drawPatches(ctx, texture, eyelidPatches, activeTriangles, vertices);
+    ctx.restore();
   };
 }

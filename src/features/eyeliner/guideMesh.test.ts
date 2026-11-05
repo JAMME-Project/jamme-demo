@@ -72,10 +72,13 @@ describe('face guide mesh', () => {
       expect(anchors.reduce((sum, anchor) => sum + anchor.weight, 0)).toBeCloseTo(1);
       expect(anchors.every(({ index }) => index >= 0 && index < 468)).toBe(true);
     }
-    for (const patches of Object.values(mesh.guides)) {
+    for (const [guide, patches] of Object.entries(mesh.guides)) {
       expect(patches.length).toBeGreaterThan(0);
       for (const patch of patches) {
-        const source = mesh.triangles[patch].map((index) => mesh.vertices[index]);
+        const source = mesh.triangles[patch].map((index) => {
+          const vertex = mesh.vertices[index];
+          return guide === 'eye2' ? { x: vertex.baselineX, y: vertex.baselineY } : vertex;
+        });
         expect(triangleTransform(source, source)).not.toBeNull();
       }
     }

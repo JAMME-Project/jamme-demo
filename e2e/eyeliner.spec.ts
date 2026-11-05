@@ -59,13 +59,80 @@ test('the camera stays on through practice and releases for review and retakes',
     .poll(() =>
       page.getByLabel('카메라 영상과 아이라인 가이드').evaluate((element) => {
         const ctx = (element as HTMLCanvasElement).getContext('2d')!;
-        const pixels = ctx.getImageData(45, 370, 36, 26).data;
+        const pixels = ctx.getImageData(45, 345, 90, 50).data;
         return pixels.some(
           (red, i) => i % 4 === 0 && red < 155 && pixels[i + 1] > 145 && pixels[i + 2] > 210,
         );
       }),
     )
     .toBe(true);
+
+  const placement = await page.evaluate(async () => {
+    const modulePath = '/src/features/eyeliner/faceTracker.ts';
+    const { createFaceTracker } = await import(modulePath);
+    const tracker = await createFaceTracker();
+    const video = document.querySelector('video')!;
+    const face = tracker.detectForVideo(video, performance.now()).faceLandmarks[0];
+    tracker.close();
+    const canvas = document.querySelector<HTMLCanvasElement>('.j-camera-feed canvas')!;
+    const ctx = canvas.getContext('2d')!;
+    const pixels = ctx.getImageData(0, 0, canvas.width, canvas.height).data;
+    const point = (index: number) => ({
+      x: (1 - face[index].x) * canvas.width,
+      y: face[index].y * canvas.height,
+    });
+    const rings = [
+      [263, 249, 390, 373, 374, 380, 381, 382, 362, 398, 384, 385, 386, 387, 388, 466],
+      [33, 7, 163, 144, 145, 153, 154, 155, 133, 173, 157, 158, 159, 160, 161, 246],
+    ];
+    return rings.map((ring, side) => {
+      const points = ring.map(point);
+      const polygon = new Path2D();
+      points.forEach((p, i) => (i === 0 ? polygon.moveTo(p.x, p.y) : polygon.lineTo(p.x, p.y)));
+      polygon.closePath();
+      let count = 0;
+      let totalX = 0;
+      let totalY = 0;
+      let inside = 0;
+      for (let y = 0; y < canvas.height; y++) {
+        for (let x = (side * canvas.width) / 2; x < ((side + 1) * canvas.width) / 2; x++) {
+          const offset = (y * canvas.width + x) * 4;
+          if (pixels[offset] >= 155 || pixels[offset + 1] <= 145 || pixels[offset + 2] <= 210)
+            continue;
+          count++;
+          totalX += x + 0.5;
+          totalY += y + 0.5;
+          if (!ctx.isPointInPath(polygon, x + 0.5, y + 0.5)) continue;
+          const distance = Math.min(
+            ...points.map((a, i) => {
+              const b = points[(i + 1) % points.length];
+              const dx = b.x - a.x;
+              const dy = b.y - a.y;
+              const along = Math.max(
+                0,
+                Math.min(1, ((x + 0.5 - a.x) * dx + (y + 0.5 - a.y) * dy) / (dx * dx + dy * dy)),
+              );
+              return Math.hypot(x + 0.5 - a.x - along * dx, y + 0.5 - a.y - along * dy);
+            }),
+          );
+          if (distance > 2) inside++;
+        }
+      }
+      const outer = points[0];
+      const inner = points[8];
+      const dx = inner.x - outer.x;
+      const dy = inner.y - outer.y;
+      const fraction =
+        ((totalX / count - outer.x) * dx + (totalY / count - outer.y) * dy) / (dx * dx + dy * dy);
+      return { count, inside, fraction };
+    });
+  });
+  for (const eye of placement) {
+    expect(eye.count).toBeGreaterThan(5);
+    expect(eye.inside).toBe(0);
+    expect(eye.fraction).toBeGreaterThan(0.15);
+    expect(eye.fraction).toBeLessThan(0.35);
+  }
 
   for (const label of [
     '점을 찍었어요',

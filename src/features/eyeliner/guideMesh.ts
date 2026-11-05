@@ -3,8 +3,13 @@ import mesh from './guideMesh.data.json';
 
 export type Point = { x: number; y: number };
 
-// The reference was detected on the mirrored Figma photo, then mapped back to artwork pixels.
-// Each vertex follows the same landmark indices in the mirrored live preview.
+export const eyeContours = [
+  [263, 249, 390, 373, 374, 380, 381, 382, 362, 398, 384, 385, 386, 387, 388, 466],
+  [33, 7, 163, 144, 145, 153, 154, 155, 133, 173, 157, 158, 159, 160, 161, 246],
+] as const;
+
+// Each eye's artwork contour is calibrated to its own upper-eyelid landmarks.
+// The nose-to-brow guide retains the original facial surface calibration.
 export function projectGuideVertices(
   landmarks: readonly NormalizedLandmark[],
   width: number,
