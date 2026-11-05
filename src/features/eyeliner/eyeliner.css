@@ -501,7 +501,7 @@ body:has(.j-v2) {
 }
 .j-capture-target {
   position: absolute;
-  inset: clamp(251px, calc(38.626dvh - 48px), 278px) 16px auto;
+  inset: calc(45% + 24px - min(84px, 10.5dvh)) 16px auto;
   display: grid;
   gap: 12px;
   justify-items: center;
@@ -630,7 +630,7 @@ body:has(.j-v2) {
     padding-top: 4px;
   }
   .j-capture-target {
-    inset-block-start: max(210px, 51%);
+    inset-block-start: calc(45% + 24px - min(63px, 8.5dvh));
   }
   .j-capture-frame {
     height: min(126px, 17dvh);
