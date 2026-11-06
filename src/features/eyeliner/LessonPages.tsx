@@ -55,7 +55,7 @@ export function Introduction({ onNext }: { onNext: () => void }) {
       <AppBar title="젬메 아이라인 튜토리얼" />
       <main className="j-scroll j-intro">
         <div className="j-hero">
-          <img src={asset('result-reference.jpg')} alt="아이라인을 완성한 눈매 예시" />
+          <img src={asset('eyeliner-example.png')} alt="아이라인을 완성한 눈매 예시" />
           <Chip tone="glass">완성 예시</Chip>
         </div>
         <div className="j-chips">
