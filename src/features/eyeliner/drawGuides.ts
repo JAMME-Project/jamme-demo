@@ -17,6 +17,7 @@ const artwork = {
 } satisfies Record<Exclude<LensKey, 'eye2'> | 'puff', string>;
 
 type GuideImages = Record<keyof typeof artwork, HTMLImageElement>;
+const rightEyeOffsetRatio = 0.025;
 const animationBounds = {
   animation1: [
     [34, 68],
@@ -73,7 +74,7 @@ function drawPatches(
     }
     ctx.closePath();
     ctx.clip();
-    ctx.setTransform(...transform);
+    ctx.transform(...transform);
     ctx.drawImage(
       texture,
       patch.left,
@@ -171,6 +172,9 @@ export function createGuideRenderer(images: GuideImages) {
     ctx.clip('evenodd');
     for (const [side, eye] of eyes.entries()) {
       if (eye.width < 5) continue;
+      ctx.save();
+      // Apply the offset in the mirrored preview, after clipping to the real eye contours.
+      if (side === 1) ctx.translate(eye.width * rightEyeOffsetRatio, 0);
       if (guides.includes('eye2')) {
         ctx.save();
         ctx.strokeStyle = '#5ab8f6';
@@ -184,6 +188,7 @@ export function createGuideRenderer(images: GuideImages) {
         ctx.restore();
       }
       drawPatches(ctx, texture, activePatches[side], projectEyelidRibbon(eye, side));
+      ctx.restore();
     }
     ctx.restore();
   };
