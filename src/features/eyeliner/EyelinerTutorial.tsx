@@ -19,6 +19,7 @@ export function EyelinerTutorial() {
   const fingers = useRef(new Map<number, { x: number; y: number }>());
   const pinch = useRef<{ distance: number; zoom: number } | null>(null);
   const step = steps[index];
+  const zoomStep = step.key === 'zoom';
   const capture = step.key === 'capture';
   const cameraPage = page === 'camera';
   const camera = useLessonCamera({ key: `${step.key}:${replay}`, guides: step.guides });
@@ -147,10 +148,25 @@ export function EyelinerTutorial() {
             {running && (
               <section className="j-bubble" aria-live="polite">
                 <div className="j-bubble-heading">
-                  <Chip>{capture ? '결과 확인' : step.number ? `${step.number} / 8` : '준비'}</Chip>
+                  <Chip>
+                    {capture
+                      ? '결과 확인'
+                      : step.number
+                        ? `${step.number} / 8`
+                        : `준비 ${index + 1} / 2`}
+                  </Chip>
                   <h1>{step.title}</h1>
                 </div>
                 <p>{step.body}</p>
+                {zoomStep && (
+                  <button
+                    className="j-zoom-toggle"
+                    type="button"
+                    onClick={() => setZoom((current) => (current > 1 ? 1 : 1.35))}
+                  >
+                    {zoom > 1 ? '원래 크기' : '화면 확대'}
+                  </button>
+                )}
                 {step.tip && (
                   <p className="j-tip">
                     <img src={asset('sparkle.svg')} alt="" />

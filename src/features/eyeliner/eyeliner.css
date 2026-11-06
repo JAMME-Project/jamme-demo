@@ -458,6 +458,17 @@ body:has(.j-v2) {
   font-size: 13px;
   line-height: 18px;
 }
+.j-zoom-toggle {
+  align-self: flex-start;
+  min-height: 44px;
+  padding: 4px 12px;
+  border-radius: 999px;
+  background: var(--j-soft);
+  color: var(--j-strong);
+  font-size: 13px;
+  font-weight: 600;
+  pointer-events: auto;
+}
 .j-bubble .j-tip {
   display: flex;
   gap: 6px;

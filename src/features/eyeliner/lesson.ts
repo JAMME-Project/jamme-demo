@@ -30,6 +30,14 @@ const fullLine = [...startAndEnd, 'eye4', 'eye5', 'eye6'] as const;
 
 export const steps: readonly LessonStep[] = [
   {
+    key: 'zoom',
+    number: 0,
+    title: '눈이 잘 보이게 확대해요',
+    body: '두 손가락으로 화면을 벌리거나 확대 버튼을 눌러 눈이 잘 보이게 맞춰 주세요.',
+    action: '이 크기로 계속',
+    guides: [],
+  },
+  {
     key: 'setup',
     number: 0,
     title: '손을 볼에 가볍게 고정해요',

@@ -53,7 +53,16 @@ test('the camera stays on through practice and releases for review and retakes',
   await expect(page.getByRole('alert')).toHaveText('초대 코드가 맞지 않아요.');
   await enterLesson(page);
   await expect(page.getByLabel('카메라 영상과 아이라인 가이드')).toBeVisible({ timeout: 20_000 });
+  await expect(page.getByRole('heading', { name: '눈이 잘 보이게 확대해요' })).toBeVisible();
+  const preview = page.getByLabel('카메라 영상과 아이라인 가이드');
+  await page.getByRole('button', { name: '화면 확대', exact: true }).click();
+  await expect(preview).toHaveCSS('transform', 'matrix(1.35, 0, 0, 1.35, 0, 0)');
+  await page.getByRole('button', { name: '원래 크기', exact: true }).click();
+  await expect(preview).toHaveCSS('transform', 'matrix(1, 0, 0, 1, 0, 0)');
+  await page.getByRole('button', { name: '화면 확대', exact: true }).click();
+  await page.getByRole('button', { name: '이 크기로 계속' }).click();
   await expect(page.getByRole('heading', { name: '손을 볼에 가볍게 고정해요' })).toBeVisible();
+  await expect(preview).toHaveCSS('transform', 'matrix(1.35, 0, 0, 1.35, 0, 0)');
   await page.getByRole('button', { name: '준비됐어요' }).click();
   await expect
     .poll(() =>
